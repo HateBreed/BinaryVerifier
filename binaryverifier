@@ -112,7 +112,7 @@ verify_binary_checksums() {
 	done
 }
 
-source ./binaryverifier.conf
+source $PWD/./binaryverifier.conf
 
 export SYS_DIRS
 export BINARIES
@@ -145,8 +145,8 @@ case $METHOD in
 	;;
 esac
 
-if [ -f $METHOD.conf ] ; then
-	source ./$METHOD.conf
+if [ -f $PWD/$METHOD.conf ] ; then
+	source $PWD/./$METHOD.conf
 else
 	echo "No $METHOD.conf file found, aborting"
 	exit 0
