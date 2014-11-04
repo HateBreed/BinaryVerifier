@@ -1,0 +1,162 @@
+#!/bin/bash
+
+# 0 = search, 1 = download, 2 = extract, 3 = query status/policy, 4 = status/policy sed-line
+#METHOD_APT=("apt-file search" "apt-get download" "dpkg-deb -e" "apt-cache policy" 's/^.*Installed:.//p')
+#METHOD_APT_DPKG=("dpkg -S" "apt-get download" "dpkg-deb -e" "apt-cache policy" 's/^.*Installed:.//p')
+#METHOD_DPKG=("dpkg -S" "apt-get download" "dpkg-deb -e" "dpkg-query -s" 's/^Version:.//p')
+#METHOD_RPM=("rpm" "rpm" "" "")
+
+add_package_to_list() {
+	local PCK=$1
+	local BIN=$2
+	local DUP=0
+	local POS=0
+	local DPOS=0
+
+	# Check if package exists in list
+	for P in ${PACKAGES[*]} ; do
+		if [ "$PCK" = "$P" ] ; then
+			DUP=1
+			DPOS=$POS
+		fi
+		POS=$((POS+1))
+	done
+
+	# Not found, add new
+	if [ "$DUP" = "0" ] ; then
+		PACKAGES[$PCKGS_IN_ARRAY]="$PCK"
+		PACKAGES_BINARIES[$PCKGS_IN_ARRAY]="$BIN"
+		#PACKAGES_VERSIONS[$PCKGS_IN_ARRAY]=$(apt-cache policy "$PCK"|sed -n 's/^.*Installed:.//p')
+		PACKAGES_VERSIONS[$PCKGS_IN_ARRAY]=$(${PKG_METHOD[3]} "$PCK"|sed -n ${PKG_METHOD[4]})
+		PACKAGES_DOWNLOAD[$PCKGS_IN_ARRAY]="${PACKAGES[$PCKGS_IN_ARRAY]}=${PACKAGES_VERSIONS[$PCKGS_IN_ARRAY]}"
+		PCKGS_IN_ARRAY=$((PCKGS_IN_ARRAY+1))
+	# Found, add a binary
+	else
+		PACKAGES_BINARIES[$DPOS]="${PACKAGES_BINARIES[$DPOS]} $BIN"
+	fi
+}
+
+print_packages() {
+	local INDEX=0
+	while [ $INDEX -lt $PCKGS_IN_ARRAY ] ; do
+		echo "${PACKAGES[$INDEX]} (${PACKAGES_VERSIONS[$INDEX]}) : ${PACKAGES_BINARIES[$INDEX]}" 
+		INDEX=$((INDEX+1))
+	done
+}
+
+get_package() {
+	local NAME=$1
+	PACKAGE=$(${PKG_METHOD[0]} $NAME|grep " $NAME$"|cut -d':' -f1)
+	#PACKAGE=$(apt-file search $NAME|sed -n -e 's/: \$NAME$//p')
+	if [ -z $PACKAGE ] ; then
+		echo " NO PACKAGE!!"
+	else
+		echo " in package: $PACKAGE"
+		add_package_to_list $PACKAGE $NAME
+	fi
+}
+
+get_packages() {
+	for DIR in $SYS_DIRS; do
+	        echo "Binaries in \"$DIR\""
+	        for BIN in $BINARIES ; do
+	                if [ -x $DIR/$BIN ] ; then
+	                        echo -n "$BIN found at: $DIR/$BIN"
+	                        if [ -L $DIR/$BIN ] ; then
+	                        	get_package $(readlink -f "$DIR/$BIN")
+	                        else
+		                        get_package "$DIR/$BIN"
+		                      fi
+	                fi
+	        done
+	        echo ""
+	done
+}
+
+download_packages() {
+	cd $DOWNLOAD_DIR && ${PKG_METHOD[1]} ${PACKAGES_DOWNLOAD[*]}
+}
+
+extract_package_content() {
+	local __PCKG=$1
+	cd $DOWNLOAD_DIR && ${PKG_METHOD[2]} $(find $__PCKG*.deb) $__PCKG
+}
+
+verify_checksums() {
+	if [ "$1" = "$2" ] ; then
+		echo "Match"
+	else
+		echo "No match"
+	fi
+}
+
+verify_binary_checksums() {
+	local __PIDX=0
+	for PCKG in ${PACKAGES[*]} ; do
+		extract_package_content $PCKG
+	        for PCKGBIN in ${PACKAGES_BINARIES[$__PIDX]} ; do
+	                BINMD5=$(md5sum $PCKGBIN|cut -d' ' -f1)
+	                SEARCHBIN=$(echo "$PCKGBIN"|sed 's/.\(.*\)/\1/')
+	                PCKGMD5=$(grep -e "$SEARCHBIN$" "$DOWNLOAD_DIR/$PCKG/md5sums"|cut -d' ' -f1)    
+	                
+	                # Most likely a symlink
+	                if [ -z $PCKGMD5 ] && [ -L $PCKGBIN ] ; then
+	                        SEARCHBIN=$(readlink -f "$PCKGBIN"|sed 's/.\(.*\)/\1/')
+	                        PCKGMD5=$(grep -e "$SEARCHBIN$" "$DOWNLOAD_DIR/$PCKG/md5sums"|cut -d' ' -f1)
+	                fi
+	
+	                echo -ne "$PCKGBIN:\t $BINMD5 - $PCKGMD5 "
+						verify_checksums $BINMD5 $PCKGMD5
+					done
+	        __PIDX=$((__PIDX+1))
+	done
+}
+
+source ./binaryverifier.conf
+
+export SYS_DIRS
+export BINARIES
+
+export PCKGS_IN_ARRAY=0
+export PACKAGES
+export PACKAGES_BINARIES
+export PACKAGES_VERSIONS
+export PACKAGES_DOWNLOAD
+ARCH=$(uname -m)
+
+if [ ! -d $DOWNLOAD_DIR ] ; then mkdir $DOWNLOAD_DIR ; fi
+
+case $METHOD in
+	apt)
+	echo "Using apt"
+	;;
+	aptdpkg)
+	echo "Using apt and dpkg"
+	;;
+	dpkg)
+	echo "using dpkg"
+	;;
+	rpm)
+	echo "using rpm"
+	;;
+	*)
+	echo "Invalid mode, applicable are: apt, aptdpkg, dpkg and rpm"
+	exit 0
+	;;
+esac
+
+if [ -f $METHOD.conf ] ; then
+	source ./$METHOD.conf
+else
+	echo "No $METHOD.conf file found, aborting"
+	exit 0
+fi
+
+export PKG_METHOD
+echo "${PKG_METHOD[0]}" "${PKG_METHOD[1]}" "${PKG_METHOD[2]}" "${PKG_METHOD[3]}" "${PKG_METHOD[4]}"
+#exit 0
+
+get_packages
+print_packages
+download_packages
+verify_binary_checksums

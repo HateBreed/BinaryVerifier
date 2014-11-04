@@ -1,0 +1,16 @@
+# Pre-requisities:
+# - apt-file (do apt-file update at run)
+# - 
+
+#1. See content of /sbin /bin /usr/sbin /usr/bin /usr/local/bin
+#2. Select some of the binaries or all (follow symlinks?)
+#3. Use the name and path of binary to get the package: apt-file search $NAME|grep "$NAME$"|cut -d':' -f1
+# - If more than one binaries are in the package group them
+#4. Check if the package is installed with apt-cache search
+# - if there is a newer version, force to download the current version of the package
+# - if not possible, suggest upgrading?
+#5. Add the full package name into the list including version
+#6. When all binaries are searched for and names are added to list download with: apt-get
+#7. For each binary-package pair, extract the control.tar.gz with: ar -x control.tar.gz
+#8. Calculate md5sum of the binary and using the latter field, grep the correct sum from control.tar.gz/md5sums -file
+#9. Report result of comparison
